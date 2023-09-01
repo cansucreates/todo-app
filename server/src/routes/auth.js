@@ -1,41 +1,77 @@
 const express = require('express');
 const routes = express.Router();
-const passport = require('passport-google-oauth20');
-const jwt = require('jsonwebtoken')
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20');
+const jwt = require('jsonwebtoken');
 
-// You should ask for the scopes `profile email openid`.
-routes.get('/api/auth/google', passport.authenticate("google", { scope: ['profile', 'email', 'openid'] }), (req, res) => {
-  res.end();
-});
+const User = require('../models/User');
+const { authenticate } = require('../middleware/checkAuth');
 
-routes.get('/api/auth/me', (req, res) => {
+// google strategy config
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GAPP_CLIENT_ID,
+      clientSecret: process.env.GAPP_CLIENT_SECRET,
+      callbackURL: 'http://localhost:3000/api/auth/google/callback',
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      // Find or create user
+      let user = await User.findOne({ googleId: profile.id });
+
+      if (!user) {
+        user = await new User({
+          name: profile.displayName,
+          email: profile.emails[0].value,
+          googleId: profile.id,
+        }).save();
+      }
+
+      done(null, user);
+    }
+  )
+);
+
+routes.get(
+  '/api/auth/google',
+  passport.authenticate('google', { scope: ['profile', 'email', 'openid'] }),
+  (req, res) => {
+    res.end();
+  }
+);
+
+routes.get('/api/auth/me', authenticate, (req, res) => {
   res.json(req.auth);
 });
 
-routes.get('/api/auth/google/callback', passport.authenticate("google", { failureRedirect: "/login", session: false}), function (req, res) {
-  const expiresIn = 14 * 24 * 3600;    
-  const token = jwt.sign(
-        { name, email, providerId, avatar: profilePicture },
-        process.env.TOKEN_KEY,
-        {
-          expiresIn,
-        }
-      );
+routes.get(
+  '/api/auth/google/callback',
+  passport.authenticate('google', { session: false }),
+  (req, res) => {
+    const user = req.user;
+    const token = jwt.sign(
+      {
+        userName: user.userName,
+        email: user.email,
+        providerId: `google-${user.providerId}`,
+      },
+      process.env.SECRET_KEY,
+      { expiresIn: '14d' }
+    );
+    console.log(token, 'tokenn');
+    res.cookie('jwt', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 14 * 24 * 60 * 60 * 1000,
+    });
 
-      // Save user token in a cookie
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: false, // true for https
-        maxAge: expiresIn * 1000,
-        signed: true,
-      });
-  res.redirect("/")
-  res.end();
-});
+    res.redirect('/');
+  }
+);
 
-routes.get('/api/auth/logout', (req, res) => {
+routes.get('/api/auth/logout', authenticate, (req, res) => {
   res.clearCookie('token');
-  res.status(200).json({success: true});
+  res.status(200).json({ success: true });
 });
 
 module.exports = routes;
