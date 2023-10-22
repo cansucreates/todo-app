@@ -1,4 +1,4 @@
-# Awesome Todos: API Server -
+# - Awesome Todos: API Server -
 This project serves as a robust API server tailored for Todo management.
 
 # CRUD Operations 
